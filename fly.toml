@@ -1,0 +1,11 @@
+app = 'YOUR-APP-NAME'
+primary_region = 'ams'
+
+[build]
+
+[env]
+  TZ = 'Europe/Kyiv'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

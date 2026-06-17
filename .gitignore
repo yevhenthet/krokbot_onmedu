@@ -1,0 +1,19 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Data files specific to each department
+krok1_microbiology_mcqs.json
+telegram_posts.json
+telegram_posts.txt
+bot_state.json
+image_ids.json
+fix_posts.py
+
+# Images folder (upload via upload_images.py)
+images/
+
+# Excel source files
+*.xlsx
+~$*
