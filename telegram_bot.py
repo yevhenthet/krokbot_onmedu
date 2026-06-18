@@ -43,7 +43,7 @@ CHANNEL_ID = os.environ.get('TELEGRAM_CHANNEL_ID', '')
 POLL_HOUR   = 8
 ANSWER_HOUR = 10
 
-STATE_FILE  = Path('bot_state.json')
+STATE_FILE  = Path('/data/bot_state.json')
 POSTS_FILE  = Path('telegram_posts.json')
 MCQS_FILE   = Path('krok1_microbiology_mcqs.json')
 IMAGES_DIR   = Path('images')
