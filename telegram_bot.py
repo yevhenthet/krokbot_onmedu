@@ -294,8 +294,8 @@ def run_scheduler():
         sys.exit(1)
 
     scheduler = BlockingScheduler(timezone='Europe/Kyiv')
-    scheduler.add_job(send_poll,   'cron', hour=POLL_HOUR,   minute=0)
-    scheduler.add_job(send_answer, 'cron', hour=ANSWER_HOUR, minute=0)
+    scheduler.add_job(send_poll,   'cron', hour=POLL_HOUR,   minute=0, misfire_grace_time=300)
+    scheduler.add_job(send_answer, 'cron', hour=ANSWER_HOUR, minute=0, misfire_grace_time=300)
 
     print(f"🕐 Scheduler запущено (Kyiv time)")
     print(f"   Poll:   {POLL_HOUR:02d}:00")
