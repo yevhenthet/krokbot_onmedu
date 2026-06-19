@@ -16,19 +16,31 @@ from pathlib import Path
 import anthropic
 
 MCQS_FILE = Path('krok1_microbiology_mcqs.json')
-BATCH_SIZE = 10  # questions per API call
+BATCH_SIZE = 50  # questions per API call
 MODEL = 'claude-haiku-4-5-20251001'  # fast + cheap for bulk generation
 
 SYSTEM = (
-    "Ти асистент-викладач мікробіології для студентів-медиків. "
-    "Твоя задача: написати коротку ПІДКАЗКУ (не відповідь!) до тестового питання КРОК-1. "
-    "Підказка має:\n"
-    "• вказати на ключову відмінну ознаку або мнемонічне правило, що допомагає знайти правильну відповідь\n"
-    "• НЕ називати правильну відповідь прямо\n"
-    "• бути ≤190 символів\n"
-    "• бути українською мовою\n"
-    "• починатися з дієслова або ключового факту (не з 'Підказка:')"
+    "Ви — викладач кафедри мікробіології медичного університету. "
+    "Ваше завдання: скласти коротку підказку до тестового завдання КРОК-1. "
+    "Вимоги до підказки:\n"
+    "• Висвітлити ключову диференційну ознаку або патогномонічний критерій, що дозволяє обрати правильну відповідь\n"
+    "• НЕ називати правильну відповідь явно\n"
+    "• Обсяг — не більше 150 символів (СУВОРО: якщо перевищує — скорочуй до завершення думки в межах 150)\n"
+    "• Мова — українська, академічний стиль (без розмовних зворотів, без знаків оклику, без слів 'шукай', 'згадай', 'пригадай')\n"
+    "• Починати з іменника або дієслова у наказовому способі академічного реєстру (напр. 'Зверніть увагу...', 'Ключова ознака...', 'Диференційна діагностика...')\n"
+    "• Не використовувати тире '—' як риторичний прийом; лише як пунктуаційний знак за потреби"
 )
+
+
+def _smart_truncate(text: str, max_len: int = 190) -> str:
+    if len(text) <= max_len:
+        return text
+    for sep in ('.', '!', '?', ';'):
+        idx = text.rfind(sep, 0, max_len)
+        if idx > max_len * 0.55:
+            return text[:idx + 1]
+    idx = text.rfind(' ', 0, max_len - 3)
+    return (text[:idx] + '...') if idx > 0 else text[:max_len]
 
 
 def make_user_prompt(batch: list[dict]) -> str:
@@ -47,7 +59,7 @@ def make_user_prompt(batch: list[dict]) -> str:
 def generate_hints_batch(client: anthropic.Anthropic, batch: list[dict]) -> dict[int, str]:
     msg = client.messages.create(
         model=MODEL,
-        max_tokens=1024,
+        max_tokens=8000,
         system=SYSTEM,
         messages=[{"role": "user", "content": make_user_prompt(batch)}],
     )
@@ -99,7 +111,7 @@ def main():
         try:
             result = generate_hints_batch(client, batch)
             for qid, hint in result.items():
-                hints_map[qid] = hint[:190]  # enforce char limit
+                hints_map[qid] = _smart_truncate(hint, 190)
             done += len(result)
             print(f"✓ ({len(result)}/{len(batch)})")
         except Exception as e:
