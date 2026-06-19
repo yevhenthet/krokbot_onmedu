@@ -132,9 +132,11 @@ def send_image(qid):
     return data['result']['message_id']
 
 
-def build_explanation(post_text):
-    """Extract up to 200 chars of key facts from post for poll explanation."""
-    # Grab first key fact line
+def build_explanation(q, post_text):
+    """Return hint from MCQ data, or fall back to first emoji bullet from post."""
+    hint = q.get('hint', '').strip()
+    if hint:
+        return hint[:200]
     match = re.search(r'[🔬🧫💉⚠️🦠🔴🩸🧬🔵💊]\s*(.+)', post_text)
     if match:
         text = match.group(1).strip()
@@ -164,7 +166,7 @@ def send_poll(qid=None, dry_run=False):
             break
     correct_option_id = all_options.index(correct_text)
     options = all_options
-    explanation = build_explanation(post)
+    explanation = build_explanation(q, post)
 
     print(f"📤 Відправляю POLL id={qid}: {q['question'][:60]}...")
     if dry_run:
