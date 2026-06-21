@@ -168,10 +168,17 @@ def send_poll(qid=None, dry_run=False):
     options = all_options
     explanation = build_explanation(q, post)
 
-    print(f"📤 Відправляю POLL id={qid}: {q['question'][:60]}...")
+    question_text = q['question']
+    long_question = len(question_text) > 300
+    poll_question = "↑ Питання вище — оберіть правильну відповідь:" if long_question else question_text
+
+    print(f"📤 Відправляю POLL id={qid}: {question_text[:60]}...")
     if dry_run:
         img = find_image(qid)
         print(f"  Зображення: {img or 'немає'}")
+        if long_question:
+            print(f"  Довге питання ({len(question_text)} симв.) — буде окреме повідомлення")
+        print(f"  Poll питання: {poll_question}")
         print(f"  Варіанти: {options}")
         print(f"  Правильна: [{correct_option_id}] {options[correct_option_id]}")
         print(f"  Пояснення: {explanation}")
@@ -183,10 +190,15 @@ def send_poll(qid=None, dry_run=False):
         send_image(qid)
         time.sleep(0.3)
 
+    # Send full question text as separate message if too long for poll
+    if long_question:
+        api('sendMessage', chat_id=CHANNEL_ID, text=question_text)
+        time.sleep(0.3)
+
     result = api(
         'sendPoll',
         chat_id=CHANNEL_ID,
-        question=q['question'][:300],
+        question=poll_question,
         options=options,
         type='quiz',
         correct_option_id=correct_option_id,
