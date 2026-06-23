@@ -12,34 +12,203 @@
 
 ```
 .
-├── pipeline.py              # ← єдина точка входу (оркеструє всі кроки)
+├── pipeline.py          # ← єдина точка входу (оркеструє всі кроки)
 │
-├── parse_excel.py           # Парсинг стандартного Excel ОНМедУ (Moodle) → JSON
-├── parse_claude.py          # Парсинг будь-якого формату через Claude AI
-├── generate_posts.py        # Генерація постів (розбір відповіді) через Claude API
-├── generate_hints.py        # Генерація підказок до питань через Claude API
-├── verify.py                # Верифікація і виправлення помилок у постах та підказках
-├── upload_images.py         # Завантаження зображень у Telegram
-├── telegram_bot.py          # Основний бот (scheduler + відправка)
+├── parse_excel.py       # Парсинг стандартного Excel ОНМедУ (Moodle) → JSON
+├── parse_claude.py      # Парсинг будь-якого формату через Claude AI
+├── generate.py          # Генерація постів + підказок через Claude API
+├── verify.py            # Верифікація і виправлення помилок у постах та підказках
+├── upload_images.py     # Завантаження зображень у Telegram → image_ids.json
+├── telegram_bot.py      # Основний бот (scheduler + відправка)
 │
-├── requirements.txt         # Python-залежності
-├── Dockerfile               # Для деплою на fly.io
-├── fly.toml                 # Конфігурація fly.io
+├── requirements.txt     # Python-залежності
+├── Dockerfile           # Для деплою на fly.io
+├── fly.toml             # Конфігурація fly.io
 │
-├── krok1_mcqs.json          # ← ваша база питань (не в репо)
-├── telegram_posts.json      # ← згенеровані пости (не в репо)
-├── image_ids.json           # ← file_id зображень (не в репо)
-└── images/                  # ← зображення для питань (не в репо)
+├── krok1_microbiology_mcqs.json   # ← база питань (не в репо)
+├── telegram_posts.json            # ← згенеровані пости (не в репо)
+├── image_ids.json                 # ← file_id зображень у Telegram (не в репо)
+└── images/                        # ← зображення для питань (не в репо)
 ```
+
+---
+
+## Швидкий старт
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Сценарій А: нова база питань з нуля
+
+```bash
+# 1. Парсинг Excel → JSON
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py parse --input file.xlsx
+
+# 2. Генерація постів і підказок
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate
+
+# 3. Верифікація і виправлення помилок
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify
+
+# 4. Завантаження зображень (якщо є папка images/)
+TELEGRAM_BOT_TOKEN=... python3 pipeline.py upload
+
+# 5. Деплой на Fly.io
+python3 pipeline.py deploy
+```
+
+### Сценарій Б: додати нові питання до існуючої бази
+
+```bash
+# Одна команда робить все: парсинг → мерж → генерація → верифікація
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py add --input new_questions.xlsx
+
+# Потім деплой
+python3 pipeline.py deploy
+```
+
+---
+
+## Команди pipeline.py
+
+### `parse` — парсинг нового Excel (замінює існуючу базу)
+
+```bash
+# Стандартний формат ОНМедУ (Moodle)
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py parse --input file.xlsx
+
+# Нестандартний формат (Claude розпізнає сам)
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py parse --input file.xlsx --claude
+
+# Текстовий файл (з PDF або Word)
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py parse --input file.txt --claude
+```
+
+> ⚠️ Команда `parse` **замінює** існуючий `krok1_microbiology_mcqs.json`. Для додавання питань до існуючої бази використовуйте `add`.
+
+---
+
+### `add` — додати нові питання до існуючої бази
+
+Повний автоматичний процес: парсинг → мерж → генерація → верифікація.
+
+```bash
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py add --input new_questions.xlsx
+
+# Подивитися що додасться, без змін
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py add --input new_questions.xlsx --dry-run
+
+# Нестандартний формат
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py add --input new_questions.xlsx --claude
+```
+
+**Що відбувається всередині:**
+1. Парсить новий файл у тимчасовий JSON
+2. Порівнює з існуючою базою — дублікати (за текстом питання) пропускаються
+3. Нові питання отримують ID що продовжують існуючу нумерацію
+4. Генерує пости і підказки **тільки для нових** питань
+5. Верифікує **тільки нові** питання
+
+---
+
+### `generate` — генерація постів і підказок
+
+```bash
+# Згенерувати все (пости + підказки)
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate
+
+# Тільки пости (без підказок)
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate --posts
+
+# Тільки підказки
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate --hints
+
+# Генерувати пости тільки для частини питань
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate --start 1 --end 50
+
+# Без верифікації постів (швидше, але менш точно)
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate --no-verify
+```
+
+**Пайплайн генерації постів:**
+1. `claude-sonnet-4-6` створює пост із ключовими фактами та мнемонікою. Останні 3 пости передаються як few-shot приклади для стилістичної послідовності.
+2. Той самий модель перевіряє пост на фактологічні помилки і автоматично виправляє.
+3. Результат зберігається у `telegram_posts.json` і `telegram_posts.txt`.
+
+**Генерація підказок** (`claude-haiku-4-5`) — батчами по 50 питань. Підказка (≤190 символів) вказує на ключову диференційну ознаку, але не розкриває відповідь прямо.
+
+**Відновлення після переривання:** обидва процеси продовжуються з місця зупинки — просто запустіть знову.
+
+**Орієнтовна вартість:**
+| Крок | Модель | Вартість |
+|------|--------|----------|
+| Пости (генерація + верифікація) | claude-sonnet-4-6 × 2 | ~$4–6 за 464 питання |
+| Підказки | claude-haiku-4-5 | ~$0.20–0.40 за 464 питання |
+
+---
+
+### `verify` — верифікація і виправлення помилок
+
+Повторний прохід по вже згенерованому контенту. Виправляє:
+- **Фактологічні помилки**: неправильне приписування збудників, плутанина середовищ, O/H/Vi-антитіла, антитоксин vs анатоксин
+- **Мовні помилки**: кальки з російської ("являється", "приймає участь"), граматичні конструкції, нелітературні слова
+
+```bash
+# Перевірити всі підказки і пости
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify
+
+# Тільки підказки
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify --hints
+
+# Тільки пости
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify --posts
+
+# Конкретні питання (наприклад після ручного редагування)
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify --id 6 7 8
+
+# Повторна перевірка вже перевірених постів
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify --posts --force
+
+# Показати що б виправилось, без змін
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify --dry-run
+```
+
+Прогрес зберігається у `verify_log.json` — повторна перевірка пропускає вже перевірені пости (якщо не вказано `--force`).
+
+**Орієнтовна вартість:** ~$1.50 за 464 постів (claude-sonnet-4-6), підказки — ~$0.05 (claude-haiku-4-5).
+
+---
+
+### `upload` — завантаження зображень
+
+```bash
+TELEGRAM_BOT_TOKEN=... python3 pipeline.py upload
+```
+
+Завантажує нові зображення з папки `images/` у Telegram і зберігає `file_id` у `image_ids.json`. Вже завантажені пропускаються. Зображення мають бути названі `{id}.jpg` (або `.png`, `.webp`, `.jpeg`), де `id` — номер питання.
+
+---
+
+### `deploy` — деплой на Fly.io
+
+```bash
+python3 pipeline.py deploy
+```
+
+Будує Docker-образ і деплоїть на Fly.io. Включає `krok1_microbiology_mcqs.json`, `telegram_posts.json`, `image_ids.json`.
 
 ---
 
 ## Формат бази питань
 
-Файл `krok1_mcqs.json` — результат парсингу Excel. Потрібна структура:
+Файл `krok1_microbiology_mcqs.json` — результат парсингу Excel:
 
 ```json
 {
+  "meta": {"total": 464, "source_file": "file.xlsx"},
   "questions": [
     {
       "id": 1,
@@ -54,166 +223,45 @@
         "E": "Варіант Ґ"
       },
       "correct": "A",
-      "hint": "Підказка для кнопки у Telegram-опитуванні (≤190 символів)."
+      "hint": "Підказка ≤190 символів, не розкриває відповідь."
     }
   ]
 }
 ```
 
-> **Важливо:** правильна відповідь завжди повинна бути варіантом `A`. Бот перемішує варіанти перед відправкою — правильна відповідь ніколи не буде першою у списку.
+> **Важливо:** правильна відповідь завжди варіант `A`. Бот перемішує варіанти перед відправкою — правильна ніколи не буде першою.
 
-> Поле `hint` є опціональним. Якщо відсутнє — бот автоматично витягує перший ключовий факт із поста-розбору.
-
----
-
-## Пайплайн (короткий варіант)
-
-```bash
-source venv/bin/activate
-
-# 1. Парсинг нового Excel
-ANTHROPIC_API_KEY=sk-... python3 pipeline.py parse --input file.xlsx
-
-# 2. Генерація постів та підказок
-ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate
-
-# 3. Верифікація і виправлення помилок
-ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify
-
-# 4. Завантаження зображень (якщо є)
-TELEGRAM_BOT_TOKEN=... python3 pipeline.py upload
-
-# 5. Деплой
-python3 pipeline.py deploy
-
-# Виправити конкретні питання:
-ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify --id 6 7 8
-```
+> Поле `hint` генерується автоматично. Якщо відсутнє — бот витягує перший факт із поста-розбору.
 
 ---
 
-## Крок 1. Підготовка бази питань
+## Формат Excel ОНМедУ (Moodle)
 
-### Встановлення залежностей
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-pip install openpyxl
-```
-
-### Варіант А: стандартний Excel ОНМедУ (формат імпорту Moodle)
-
-Це стандартний шаблон ОНМедУ для імпорту тестів у систему Moodle.
 Кожне питання займає **8 рядків** на аркуші:
 
 ```
 Рядок 1: №                   (номер питання)
 Рядок 2: Тема
 Рядок 3: Текст питання
-Рядок 4: Правильна відповідь (стає варіантом A)
+Рядок 4: Правильна відповідь → стає варіантом A
 Рядок 5: Варіант B
 Рядок 6: Варіант C
 Рядок 7: Варіант D
 Рядок 8: Варіант E
 ```
 
-```bash
-python3 parse_excel.py --input your_file.xlsx --output krok1_mcqs.json --stats
-```
-
-Параметр `--stats` виводить зведену статистику: кількість питань, теми, аркуші, питання без відповіді.
+Для PDF або Word — конвертуйте у `.txt` і використовуйте `--claude`:
+- PDF: `pdftotext file.pdf file.txt`
+- Word: збережіть як "Звичайний текст (.txt)"
 
 ---
 
-### Варіант Б: будь-який формат через Claude AI
+## Налаштування Telegram-бота
 
-Якщо файл має нестандартну структуру, об'єднані клітинки, або це текст із PDF/Word — використовуйте `parse_claude.py`. Claude сам розпізнає питання і витягне їх у потрібний формат.
+### Створення бота
 
-```bash
-# Excel нестандартного формату
-ANTHROPIC_API_KEY=sk-ant-... python3 parse_claude.py --input file.xlsx --output krok1_mcqs.json
-
-# Текстовий файл (з PDF/Word → .txt)
-ANTHROPIC_API_KEY=sk-ant-... python3 parse_claude.py --input file.txt --output krok1_mcqs.json
-```
-
-Для PDF або Word — спочатку конвертуйте у `.txt`:
-- PDF: `pdftotext file.pdf file.txt` (або будь-який онлайн-конвертер)
-- Word: збережіть як "Звичайний текст (.txt)" із Word
-
-> **Орієнтовна вартість:** ~$0.10–0.30 за 400–500 питань (claude-haiku-4-5).
-
----
-
-## Крок 2. Генерація постів
-
-### Встановлення
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-pip install anthropic
-```
-
-### Отримання API ключа Anthropic
-
-1. Зареєструйтесь на [console.anthropic.com](https://console.anthropic.com)
-2. Перейдіть у **API Keys** → **Create Key**
-
-### Запуск генерації
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-... python3 generate_posts.py
-
-# Генерувати тільки частину питань
-ANTHROPIC_API_KEY=sk-ant-... python3 generate_posts.py --start 1 --end 50
-
-# Без верифікації (швидше, але менш точно)
-ANTHROPIC_API_KEY=sk-ant-... python3 generate_posts.py --no-verify
-```
-
-Скрипт генерує `telegram_posts.json` і `telegram_posts.txt`.
-
-### Пайплайн генерації
-
-1. **Генерація** — `claude-sonnet-4-6` створює пост із ключовими фактами та мнемонікою. Останні 3 згенеровані пости передаються як few-shot приклади для стилістичної послідовності.
-2. **Верифікація** — той самий модель перевіряє пост на фактологічні помилки (неправильне приписування захворювань, плутанина середовищ тощо) і автоматично виправляє знайдені помилки.
-
-Орієнтовна вартість: ~$4–6 за 464 питання (claude-sonnet-4-6 × 2 виклики на питання).
-
-**Відновлення після переривання:** скрипт автоматично продовжує з місця зупинки — просто запустіть знову.
-
----
-
-## Крок 3. Генерація підказок
-
-Поле `hint` відображається в Telegram як текст за кнопкою підказки у quiz-опитуванні (≤200 символів). Підказка вказує на ключову диференційну ознаку, але **не розкриває відповідь** прямо.
-
-```bash
-# Згенерувати підказки для всіх питань (тільки для нових, без поля hint)
-ANTHROPIC_API_KEY=sk-ant-... python3 generate_hints.py
-
-# Перегенерувати всі підказки
-ANTHROPIC_API_KEY=sk-ant-... python3 generate_hints.py --force
-
-# Перегенерувати конкретні питання
-ANTHROPIC_API_KEY=sk-ant-... python3 generate_hints.py --id 1 5 10
-```
-
-Орієнтовна вартість: ~$0.20–0.40 за 464 питання (claude-haiku-4-5).
-
-> Якщо поле `hint` відсутнє у питанні — бот автоматично використовує перший ключовий факт із поста-розбору як запасний варіант.
-
----
-
-## Крок 4. Створення Telegram-бота
-
-1. Відкрийте [@BotFather](https://t.me/BotFather) у Telegram
-2. Виконайте `/newbot` і дотримуйтесь інструкцій
-3. Збережіть **токен бота** (формат: `1234567890:ABC...`)
+1. Відкрийте [@BotFather](https://t.me/BotFather) → `/newbot`
+2. Збережіть **токен** (формат: `1234567890:ABC...`)
 
 ### Отримання Chat ID каналу
 
@@ -224,96 +272,73 @@ ANTHROPIC_API_KEY=sk-ant-... python3 generate_hints.py --id 1 5 10
 
 ---
 
-## Крок 5. Зображення (опціонально)
+## Деплой на Fly.io
 
-Якщо хочете додавати зображення до кожного питання:
-
-1. Покладіть зображення у папку `images/` з назвою `{id}.jpg` (або `.png`, `.webp`)
-   ```
-   images/
-     1.jpg   ← зображення для питання id=1
-     2.png   ← зображення для питання id=2
-   ```
-
-2. Завантажте їх у Telegram (щоб не зберігати на сервері):
-   ```bash
-   TELEGRAM_BOT_TOKEN=... python3 upload_images.py
-   ```
-   Результат зберігається у `image_ids.json`.
-
-3. При деплої на fly.io завантажте `image_ids.json` разом з іншими файлами.
-
----
-
-## Крок 6. Деплой на fly.io
-
-### Встановлення flyctl
+### Встановлення та вхід
 
 ```bash
 curl -L https://fly.io/install.sh | sh
 flyctl auth login
 ```
 
-### Налаштування
-
-Відредагуйте `fly.toml` — замініть `YOUR-APP-NAME` на унікальне ім'я:
-
-```toml
-app = 'my-department-krok-bot'
-```
-
 ### Перший деплой
 
 ```bash
+# Відредагуйте fly.toml: замініть app = 'YOUR-APP-NAME'
 flyctl launch --no-deploy --copy-config
-flyctl secrets set TELEGRAM_BOT_TOKEN=1234567890:ABC... TELEGRAM_CHANNEL_ID=-1001234567890
+flyctl secrets set TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=...
 flyctl deploy
 ```
 
-### Перевірка логів
+### Корисні команди
 
 ```bash
-flyctl logs
-```
-
-### Оновлення (після зміни файлів)
-
-```bash
-flyctl deploy
-```
-
-### Оновлення JSON-файлів на сервері (без rebuild)
-
-```bash
-# Видалити старий файл і залити новий (sftp не перезаписує)
-flyctl ssh console -C "rm /app/krok1_mcqs.json"
-flyctl ssh sftp put krok1_mcqs.json /app/krok1_mcqs.json
+flyctl logs -a my-app          # логи бота в реальному часі
+flyctl status -a my-app        # стан машини
+flyctl ssh console -a my-app   # SSH у контейнер
 ```
 
 ---
 
-## Локальний запуск (без fly.io)
+## Що робить бот
+
+**О 08:00** публікує в канал:
+- Зображення питання (якщо є в `image_ids.json`)
+- Якщо питання довше 300 символів — спочатку повний текст окремим повідомленням, потім poll з підказкою "↑ Питання вище — оберіть правильну відповідь:"
+- Quiz poll із варіантами A–E (перемішані, правильна ніколи не перша)
+- Кнопка підказки: натиснути → з'являється `hint` (ключова ознака без прямої відповіді)
+
+**О 10:00** публікує розбір:
+- Правильна відповідь із коротким діагнозом
+- Ключові факти з emoji
+- Мнемонічне правило
+- Наукові назви — курсивом
+
+**Стан** зберігається у `/data/bot_state.json` (persistent volume на Fly.io). Бот пам'ятає останнє відправлене питання і продовжує послідовно. Після останнього питання починає з початку.
+
+---
+
+## Локальний запуск
 
 ```bash
 source venv/bin/activate
 
-# Тест — відправити конкретне питання зараз
-TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... python3 telegram_bot.py --poll --id 1
-TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... python3 telegram_bot.py --answer --id 1
-
-# Dry-run (без відправки)
+# Dry-run — перевірити питання без відправки
 TELEGRAM_BOT_TOKEN=x TELEGRAM_CHANNEL_ID=x python3 telegram_bot.py --test --id 5
 
-# Запустити scheduler (8:00 poll, 10:00 answer щодня)
+# Відправити poll вручну
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... python3 telegram_bot.py --poll --id 1
+
+# Відправити розбір вручну
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... python3 telegram_bot.py --answer --id 1
+
+# Запустити scheduler локально
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... python3 telegram_bot.py --schedule
 ```
 
----
+### Зміна часу розкладу
 
-## Зміна часу розкладу
-
-У `telegram_bot.py` відредагуйте константи:
-
+У `telegram_bot.py`:
 ```python
 POLL_HOUR   = 8   # година відправки питання
 ANSWER_HOUR = 10  # година відправки відповіді
@@ -321,32 +346,16 @@ ANSWER_HOUR = 10  # година відправки відповіді
 
 ---
 
-## Що робить бот
+## Зведена вартість
 
-1. **О 8:00** бот відправляє в канал:
-   - Зображення (якщо є `image_ids.json`)
-   - Якщо текст питання перевищує 300 символів — спочатку надсилається повне питання окремим повідомленням, а в poll відображається "↑ Питання вище — оберіть правильну відповідь:"
-   - Інтерактивний quiz poll з варіантами A–E (перемішані, правильна відповідь ніколи не перша)
-   - Кнопка підказки: при натисканні показує академічну підказку (поле `hint`) — вказує на ключову ознаку без прямого розкриття відповіді
-
-2. **О 10:00** бот відправляє:
-   - ✅ Правильна відповідь
-   - КЛЮЧОВІ СЛОВА з фактами
-   - Наукові назви організмів відображаються *курсивом*
-
-3. **Стан** зберігається у `bot_state.json` — бот пам'ятає яке питання було останнім і продовжує послідовно. Після останнього питання починає з початку.
-
----
-
-## Вартість
-
-| Сервіс | Вартість |
-|--------|----------|
-| Anthropic API (парсинг через Claude, один раз) | ~$0.10–0.30 за 400–500 питань |
-| Anthropic API (генерація постів, один раз) | ~$4–6 за 464 питання (Sonnet, генерація + верифікація) |
-| Anthropic API (генерація підказок, один раз) | ~$0.20–0.40 за 464 питання |
-| fly.io (хостинг бота) | Безкоштовно (shared-cpu-1x, 256MB) |
-| Telegram Bot API | Безкоштовно |
+| Операція | Модель | Вартість (одноразово) |
+|----------|--------|----------------------|
+| Парсинг через Claude | claude-haiku-4-5 | ~$0.10–0.30 / 400–500 питань |
+| Генерація постів | claude-sonnet-4-6 × 2 | ~$4–6 / 464 питання |
+| Генерація підказок | claude-haiku-4-5 | ~$0.20–0.40 / 464 питання |
+| Верифікація постів | claude-sonnet-4-6 | ~$1.50 / 464 питання |
+| Хостинг бота (Fly.io) | — | Безкоштовно (shared-cpu-1x) |
+| Telegram Bot API | — | Безкоштовно |
 
 ---
 
