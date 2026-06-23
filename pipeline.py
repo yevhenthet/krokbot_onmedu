@@ -54,15 +54,11 @@ def cmd_parse(args):
 
 
 def cmd_generate(args):
-    # Step 1: generate posts
-    posts_cmd = [sys.executable, 'generate_posts.py']
-    if args.start:  posts_cmd += ['--start', str(args.start)]
-    if args.end:    posts_cmd += ['--end',   str(args.end)]
-    if args.no_verify: posts_cmd += ['--no-verify']
-    run(posts_cmd)
-
-    # Step 2: generate hints (only missing ones)
-    run([sys.executable, 'generate_hints.py'])
+    cmd = [sys.executable, 'generate.py']
+    if args.start:     cmd += ['--start', str(args.start)]
+    if args.end:       cmd += ['--end',   str(args.end)]
+    if args.no_verify: cmd += ['--no-verify']
+    run(cmd)
 
 
 def cmd_verify(args):
