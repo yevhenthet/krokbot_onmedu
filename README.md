@@ -12,12 +12,16 @@
 
 ```
 .
+├── pipeline.py              # ← єдина точка входу (оркеструє всі кроки)
+│
 ├── parse_excel.py           # Парсинг стандартного Excel ОНМедУ (Moodle) → JSON
 ├── parse_claude.py          # Парсинг будь-якого формату через Claude AI
 ├── generate_posts.py        # Генерація постів (розбір відповіді) через Claude API
 ├── generate_hints.py        # Генерація підказок до питань через Claude API
-├── telegram_bot.py          # Основний бот (scheduler + відправка)
+├── verify.py                # Верифікація і виправлення помилок у постах та підказках
 ├── upload_images.py         # Завантаження зображень у Telegram
+├── telegram_bot.py          # Основний бот (scheduler + відправка)
+│
 ├── requirements.txt         # Python-залежності
 ├── Dockerfile               # Для деплою на fly.io
 ├── fly.toml                 # Конфігурація fly.io
@@ -59,6 +63,32 @@
 > **Важливо:** правильна відповідь завжди повинна бути варіантом `A`. Бот перемішує варіанти перед відправкою — правильна відповідь ніколи не буде першою у списку.
 
 > Поле `hint` є опціональним. Якщо відсутнє — бот автоматично витягує перший ключовий факт із поста-розбору.
+
+---
+
+## Пайплайн (короткий варіант)
+
+```bash
+source venv/bin/activate
+
+# 1. Парсинг нового Excel
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py parse --input file.xlsx
+
+# 2. Генерація постів та підказок
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py generate
+
+# 3. Верифікація і виправлення помилок
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify
+
+# 4. Завантаження зображень (якщо є)
+TELEGRAM_BOT_TOKEN=... python3 pipeline.py upload
+
+# 5. Деплой
+python3 pipeline.py deploy
+
+# Виправити конкретні питання:
+ANTHROPIC_API_KEY=sk-... python3 pipeline.py verify --id 6 7 8
+```
 
 ---
 
